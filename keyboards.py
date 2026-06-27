@@ -53,3 +53,11 @@ def admin_panel_keyboard(maintenance_status):
 def cancel_keyboard():
     keyboard = [[InlineKeyboardButton("❌ إلغاء العملية", callback_data="cancel_action")]]
     return InlineKeyboardMarkup(keyboard)
+
+# زر التبرع الشفاف بالنجوم (الجديد)
+def donation_inline_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("⭐ اضغط هنا لإظهار فاتورة الدفع", callback_data="pay_stars_50")],
+        [InlineKeyboardButton("❌ إلغاء", callback_data="cancel_action")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
