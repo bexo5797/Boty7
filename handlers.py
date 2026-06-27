@@ -11,9 +11,12 @@ from mutagen.id3 import ID3, TIT2, TPE1, APIC, error as MutagenError
 from utils import (
     check_subscription, is_maintenance, DB_FILE, OWNER_ID, 
     MAX_FILE_SIZE, get_channel_cover, add_user, add_file_record,
-    add_donation, get_donation_stats
+    add_donation, get_donation_stats, CHANNEL_USERNAME
 )
-from keyboards import main_menu_keyboard, quality_keyboard, my_song_menu_keyboard, admin_panel_keyboard
+from keyboards import (
+    main_menu_keyboard, quality_keyboard, my_song_menu_keyboard, 
+    admin_panel_keyboard, donation_inline_keyboard
+)
 
 # ============================================
 # دالة البداية
@@ -100,6 +103,31 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.clear()
         await query.edit_message_text("❌ تم إلغاء العملية.")
     
+    # ===== زر الدفع الشفاف بالنجوم =====
+    elif data == "pay_stars_50":
+        invoice = Invoice(
+            title="⭐ تبرع بـ 50 نجمة",
+            description="تبرع لدعم استمرارية وتطوير البوت\nشكراً لدعمك! 🙏",
+            payload=f"donate_50_{user_id}",
+            provider_token="",  # تترك فارغة عند استخدام النجوم XTR
+            currency="XTR",
+            prices=[LabeledPrice(label="50 نجمة", amount=50)],
+            start_parameter="donate",
+            need_name=False,
+            need_phone_number=False,
+            need_email=False,
+            need_shipping_address=False,
+            is_flexible=False,
+        )
+        try:
+            await query.message.delete()
+        except:
+            pass
+        await context.bot.send_invoice(
+            chat_id=user_id,
+            invoice=invoice,
+        )
+
     # ===== أزرار الإحصائيات =====
     elif data == "my_stats":
         conn = sqlite3.connect(DB_FILE)
@@ -395,47 +423,25 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ لست في وضع إضافة صورة حالياً.\nالرجاء استخدام الأزرار لبدء عملية جديدة.")
 
 # ============================================
-# نظام التبرع بالنجوم (50 نجمة ثابت)
+# نظام التبرع بالنجوم
 # ============================================
 async def donate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """إرسال فاتورة تبرع بـ 50 نجمة مباشرة"""
+    """إرسال واجهة التبرع التمهيدية مع الزر الشفاف"""
     if await is_maintenance(update, context): 
         return
     
-    user_id = update.effective_user.id
-    
-    invoice = Invoice(
-        title="⭐ تبرع بـ 50 نجمة",
-        description="تبرع لدعم استمرارية بوت صارخني\n"
-                    "شكراً لدعمك! 🙏",
-        payload=f"donate_50_{user_id}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label="50 نجمة", amount=50)],
-        start_parameter="donate",
-        need_name=False,
-        need_phone_number=False,
-        need_email=False,
-        need_shipping_address=False,
-        is_flexible=False,
-    )
-    
     await update.message.reply_text(
         "⭐ **تبرع بـ 50 نجمة لدعم البوت** ⭐\n\n"
-        "▪️لا يمكنك الإرسال لنفسك.\n\n"
+        "▪️ لا يمكنك التبرع لحسابك الخاص كمالك البوت.\n\n"
         "- فضلاً تابع قناتنا {جديدنا على التيليجرام} 🤍🌿\n\n"
-        "- تبرع لإستمرار عمل بوت صارحني 🎁\n\n"
+        "- تبرع لإستمرار عمل البوت وتطويره باستمرار 🎁\n\n"
         "💰 المبلغ: 50 نجمة\n\n"
-        "اضغط على الزر أدناه لإتمام الدفع:"
-    )
-    
-    await context.bot.send_invoice(
-        chat_id=user_id,
-        invoice=invoice,
+        "اضغط على الزر الشفاف بالأسفل لتأكيد الدفع:",
+        reply_markup=donation_inline_keyboard()
     )
 
 async def pre_checkout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالج ما قبل الدفع - قبول تلقائي"""
+    """معالج ما قبل الدفع - قبول تلقائي للعملية"""
     query = update.pre_checkout_query
     await query.answer(ok=True)
 
