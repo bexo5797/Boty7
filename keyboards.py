@@ -3,34 +3,37 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMa
 # القائمة الرئيسية
 def main_menu_keyboard():
     keyboard = [
-        [KeyboardButton("▶️ تشغيل البوت")],
-        [KeyboardButton("🎵 تعديل الأغنية"), KeyboardButton("🎬 استخراج صوت من فيديو")],
-        [KeyboardButton("🖼️ إنشاء أغنية كاملة (اسم + صورة + صوت)")],
+        [KeyboardButton("📸 تحسين الصورة")],
+        [KeyboardButton("✨ تحسين متقدم"), KeyboardButton("🚀 تحسين فائق")],
         [KeyboardButton("📊 إحصائياتي"), KeyboardButton("🛠 لوحة التحكم")],
         [KeyboardButton("⭐ تبرع 50 نجمة لدعم البوت")],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# قائمة أغنيتي الداخلية
+# قائمة أغنيتي (تم تغييرها لقائمة تحسين الصور)
 def my_song_menu_keyboard():
     keyboard = [
-        [InlineKeyboardButton("📝 تعديل اسم وصورة أغنية", callback_data="mysong_edit")],
-        [InlineKeyboardButton("🎬 استخراج صوت من فيديو + إضافة صورة", callback_data="mysong_extract")],
-        [InlineKeyboardButton("🆕 رفع ملف صوتي جديد + صورة", callback_data="mysong_new")],
+        [InlineKeyboardButton("📸 تحسين عادي", callback_data="enhance_standard")],
+        [InlineKeyboardButton("✨ تحسين متقدم", callback_data="enhance_premium")],
+        [InlineKeyboardButton("🚀 تحسين فائق", callback_data="enhance_super")],
+        [InlineKeyboardButton("🎯 اختيار مستوى مخصص", callback_data="enhance_custom")],
         [InlineKeyboardButton("❌ إلغاء", callback_data="cancel_action")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# قائمة اختيار الجودة
+# قائمة اختيار الجودة (أصبحت لاختيار مستوى التحسين)
 def quality_keyboard(action_type):
     keyboard = [
         [
-            InlineKeyboardButton("🎵 128kbps", callback_data=f"q_128_{action_type}"),
-            InlineKeyboardButton("🎵 192kbps", callback_data=f"q_192_{action_type}"),
+            InlineKeyboardButton("⭐ مستوى 1", callback_data=f"level_1"),
+            InlineKeyboardButton("⭐ مستوى 2", callback_data=f"level_2"),
         ],
         [
-            InlineKeyboardButton("🎵 256kbps", callback_data=f"q_256_{action_type}"),
-            InlineKeyboardButton("🎵 320kbps", callback_data=f"q_320_{action_type}"),
+            InlineKeyboardButton("⭐ مستوى 3", callback_data=f"level_3"),
+            InlineKeyboardButton("⭐ مستوى 4", callback_data=f"level_4"),
+        ],
+        [
+            InlineKeyboardButton("⭐ مستوى 5", callback_data=f"level_5"),
         ],
         [InlineKeyboardButton("❌ إلغاء", callback_data="cancel_action")]
     ]
@@ -50,14 +53,13 @@ def admin_panel_keyboard(maintenance_status):
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# لوحة إدارة القنوات الإجبارية
+# إدارة القنوات
 def channels_management_keyboard(channels):
     keyboard = []
     
-    # أزرار حذف القنوات
     for channel in channels:
-        username = channel['username']
-        name = channel['name']
+        username = channel['channel_username']
+        name = channel.get('channel_name', username)
         keyboard.append([
             InlineKeyboardButton(
                 f"🗑 حذف @{username}",
@@ -65,14 +67,12 @@ def channels_management_keyboard(channels):
             )
         ])
     
-    # زر إضافة قناة جديدة
     keyboard.append([
-        InlineKeyboardButton("➕ إضافة قناة جديدة", callback_data="channel_add_")
+        InlineKeyboardButton("➕ إضافة قناة جديدة", callback_data="channel_add")
     ])
     
-    # زر العودة للوحة التحكم
     keyboard.append([
-        InlineKeyboardButton("🔙 العودة للوحة التحكم", callback_data="admin_stats")
+        InlineKeyboardButton("🔙 العودة للوحة", callback_data="admin_stats")
     ])
     
     return InlineKeyboardMarkup(keyboard)
