@@ -3,7 +3,11 @@ import os
 import re
 from telegram import Update
 from telegram.ext import ContextTypes
-from utils import DB_FILE, OWNER_ID, MAINTENANCE_MODE, get_donation_stats, get_mandatory_channels, add_mandatory_channel, remove_mandatory_channel
+from utils import (
+    DB_FILE, OWNER_ID, MAINTENANCE_MODE, get_donation_stats, 
+    get_mandatory_channels, add_mandatory_channel, remove_mandatory_channel,
+    get_user_stats
+)
 import utils
 from keyboards import admin_panel_keyboard, channels_management_keyboard
 
@@ -29,7 +33,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     if query.data == "admin_stats":
         conn = sqlite3.connect(DB_FILE)
         users_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        files_count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+        images_count = conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0]
         
         # إحصائيات التبرعات
         donations = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM donations").fetchone()[0]
@@ -37,12 +41,20 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         
         # عدد القنوات الإجبارية
         channels_count = conn.execute("SELECT COUNT(*) FROM mandatory_channels").fetchone()[0]
+        
+        # المستخدمين النشطين اليوم
+        today = datetime.now().strftime("%Y-%m-%d")
+        active_today = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM processed_images WHERE date LIKE ?",
+            (f"{today}%",)
+        ).fetchone()[0]
         conn.close()
         
         await query.edit_message_text(
             f"📊 **إحصائيات البوت الشاملة:**\n\n"
             f"👤 عدد المستخدمين: {users_count}\n"
-            f"📁 العمليات الناجحة: {files_count}\n"
+            f"📸 الصور المحسنة: {images_count}\n"
+            f"📈 نشطاء اليوم: {active_today}\n"
             f"⭐ إجمالي التبرعات: {donations} نجمة\n"
             f"👥 عدد المتبرعين: {donors}\n"
             f"📢 القنوات الإجبارية: {channels_count}\n"
@@ -71,11 +83,13 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     elif query.data == "admin_clean":
         deleted = 0
+        temp_patterns = [
+            "enhanced_", "temp_", "_enhanced.", "_pil_enhanced.", 
+            "_sr_enhanced.", "_standard_enhanced.", "_premium_enhanced.", 
+            "_super_enhanced.", "input_", "output_", "processed_"
+        ]
         for file in os.listdir():
-            if (file.endswith(".mp3") or file.startswith("input_") or 
-                file.startswith("output_") or file.startswith("cover_") or
-                file.startswith("video_") or file.startswith("extracted_") or
-                file.startswith("audio_") or file.startswith("large_")):
+            if any(pattern in file for pattern in temp_patterns):
                 try:
                     os.remove(file)
                     deleted += 1
@@ -115,7 +129,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         channels_text = ""
         if channels:
             for i, ch in enumerate(channels, 1):
-                channels_text += f"{i}. @{ch['username']} - {ch['name']}\n"
+                channels_text += f"{i}. @{ch['channel_username']} - {ch['channel_name']}\n"
         else:
             channels_text = "لا توجد قنوات إجبارية"
         
@@ -129,18 +143,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         )
         context.user_data['admin_step'] = 'channels_management'
 
-    elif query.data.startswith("channel_add_"):
-        # بدء إضافة قناة جديدة
-        context.user_data['admin_step'] = 'adding_channel'
-        await query.edit_message_text(
-            "➕ **إضافة قناة إجبارية جديدة**\n\n"
-            "أرسل الآن معرف القناة (مثل: @my_channel)\n\n"
-            "يمكنك إرسال اسم القناة بعد المعرف مفصولاً بمسافة:\n"
-            "مثال: @my_channel قناتي الرائعة"
-        )
-
     elif query.data.startswith("channel_remove_"):
-        # حذف قناة
         channel_username = query.data.replace("channel_remove_", "")
         if remove_mandatory_channel(channel_username):
             await query.answer("✅ تم حذف القناة بنجاح")
@@ -152,7 +155,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         channels_text = ""
         if channels:
             for i, ch in enumerate(channels, 1):
-                channels_text += f"{i}. @{ch['username']} - {ch['name']}\n"
+                channels_text += f"{i}. @{ch['channel_username']} - {ch['channel_name']}\n"
         else:
             channels_text = "لا توجد قنوات إجبارية"
         
@@ -170,7 +173,7 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 async def handle_channel_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة إدخال القناة من المستخدم"""
-    if context.user_data.get('admin_step') != 'adding_channel':
+    if context.user_data.get('admin_step') != 'channels_management' and context.user_data.get('admin_step') != 'adding_channel':
         return
     
     user_id = update.effective_user.id
@@ -179,58 +182,51 @@ async def handle_channel_input(update: Update, context: ContextTypes.DEFAULT_TYP
     
     text = update.message.text.strip()
     
-    # استخراج معرف القناة والاسم
-    parts = text.split(maxsplit=1)
-    channel_username = parts[0]
-    
-    # تنظيف معرف القناة
-    channel_username = channel_username.replace('@', '').strip()
-    
-    # التحقق من صحة المعرف
-    if not channel_username:
-        await update.message.reply_text("❌ معرف القناة غير صحيح. أرسل معرفاً صالحاً مثل @my_channel")
-        return
-    
-    channel_name = parts[1] if len(parts) > 1 else channel_username
-    
-    # محاولة التحقق من وجود القناة
-    try:
-        chat = await context.bot.get_chat(f"@{channel_username}")
-        channel_name = chat.title if chat.title else channel_name
+    if text.startswith('@'):
+        # إضافة قناة جديدة
+        channel_username = text.replace('@', '').strip()
         
-        if add_mandatory_channel(channel_username, channel_name, user_id):
+        if not channel_username:
+            await update.message.reply_text("❌ معرف القناة غير صحيح. أرسل معرفاً صالحاً مثل @my_channel")
+            return
+        
+        try:
+            chat = await context.bot.get_chat(f"@{channel_username}")
+            channel_name = chat.title if chat.title else channel_username
+            
+            if add_mandatory_channel(channel_username, channel_name, user_id):
+                await update.message.reply_text(
+                    f"✅ تم إضافة القناة بنجاح!\n\n"
+                    f"📢 القناة: @{channel_username}\n"
+                    f"📝 الاسم: {channel_name}\n\n"
+                    f"سيُطلب من جميع المستخدمين الاشتراك في هذه القناة."
+                )
+            else:
+                await update.message.reply_text("❌ فشل إضافة القناة. قد تكون مكررة.")
+        
+        except Exception as e:
             await update.message.reply_text(
-                f"✅ تم إضافة القناة بنجاح!\n\n"
-                f"📢 القناة: @{channel_username}\n"
-                f"📝 الاسم: {channel_name}\n\n"
-                f"سيُطلب من جميع المستخدمين الاشتراك في هذه القناة."
+                f"❌ خطأ في التحقق من القناة: {str(e)}\n\n"
+                f"تأكد من أن القناة موجودة وأن البوت لديه صلاحية الوصول إليها."
             )
+            return
+        
+        context.user_data['admin_step'] = None
+        
+        # عرض إدارة القنوات مرة أخرى
+        channels = get_mandatory_channels()
+        channels_text = ""
+        if channels:
+            for i, ch in enumerate(channels, 1):
+                channels_text += f"{i}. @{ch['channel_username']} - {ch['channel_name']}\n"
         else:
-            await update.message.reply_text("❌ فشل إضافة القناة. قد تكون مكررة.")
-    
-    except Exception as e:
+            channels_text = "لا توجد قنوات إجبارية"
+        
         await update.message.reply_text(
-            f"❌ خطأ في التحقق من القناة: {str(e)}\n\n"
-            f"تأكد من أن القناة موجودة وأن البوت لديه صلاحية الوصول إليها."
+            f"📢 **إدارة القنوات الإجبارية**\n\n"
+            f"القنوات الحالية:\n{channels_text}\n\n"
+            f"🔹 أضف قناة جديدة: أرسل @username\n"
+            f"🔹 احذف قناة: استخدم الأزرار أدناه\n\n"
+            f"⚠️ المستخدمون يجب أن يكونوا مشتركين في جميع القنوات الإجبارية لاستخدام البوت.",
+            reply_markup=channels_management_keyboard(channels)
         )
-        return
-    
-    context.user_data['admin_step'] = None
-    
-    # عرض إدارة القنوات مرة أخرى
-    channels = get_mandatory_channels()
-    channels_text = ""
-    if channels:
-        for i, ch in enumerate(channels, 1):
-            channels_text += f"{i}. @{ch['username']} - {ch['name']}\n"
-    else:
-        channels_text = "لا توجد قنوات إجبارية"
-    
-    await update.message.reply_text(
-        f"📢 **إدارة القنوات الإجبارية**\n\n"
-        f"القنوات الحالية:\n{channels_text}\n\n"
-        f"🔹 أضف قناة جديدة: أرسل @username\n"
-        f"🔹 احذف قناة: استخدم الأزرار أدناه\n\n"
-        f"⚠️ المستخدمون يجب أن يكونوا مشتركين في جميع القنوات الإجبارية لاستخدام البوت.",
-        reply_markup=channels_management_keyboard(channels)
-    )
