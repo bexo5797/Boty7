@@ -45,9 +45,11 @@ def main():
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     
-    # === معالجات الوسائط ===
+    # === معالجات الصور ===
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.Document.IMAGE, photo_handler))
+    
+    # === معالج الملفات (للتوافق) ===
     app.add_handler(MessageHandler(filters.AUDIO, media_handler))
     app.add_handler(MessageHandler(filters.VIDEO, media_handler))
     app.add_handler(MessageHandler(filters.Document.AUDIO, media_handler))
@@ -55,7 +57,8 @@ def main():
     # === معالج النصوص (يأتي أخيراً) ===
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    print("🤖 البوت يعمل الآن بنجاح مع دعم التبرعات بالنجوم...")
+    print("🤖 بوت تحسين الصور يعمل الآن بنجاح مع دعم التبرعات بالنجوم...")
+    print("📸 أرسل صورة لتحسينها!")
     app.run_polling()
 
 if __name__ == "__main__":
