@@ -45,19 +45,39 @@ def admin_panel_keyboard(maintenance_status):
         [InlineKeyboardButton("📢 إذاعة (Broadcast)", callback_data="admin_broadcast")],
         [InlineKeyboardButton("🗑 تنظيف الملفات المؤقتة", callback_data="admin_clean")],
         [InlineKeyboardButton("⭐ إحصائيات التبرعات", callback_data="admin_stars_stats")],
+        [InlineKeyboardButton("📢 إدارة القنوات الإجبارية", callback_data="admin_channels")],
         [InlineKeyboardButton("❌ إغلاق اللوحة", callback_data="close_admin")]
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+# لوحة إدارة القنوات الإجبارية
+def channels_management_keyboard(channels):
+    keyboard = []
+    
+    # أزرار حذف القنوات
+    for channel in channels:
+        username = channel['username']
+        name = channel['name']
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🗑 حذف @{username}",
+                callback_data=f"channel_remove_{username}"
+            )
+        ])
+    
+    # زر إضافة قناة جديدة
+    keyboard.append([
+        InlineKeyboardButton("➕ إضافة قناة جديدة", callback_data="channel_add_")
+    ])
+    
+    # زر العودة للوحة التحكم
+    keyboard.append([
+        InlineKeyboardButton("🔙 العودة للوحة التحكم", callback_data="admin_stats")
+    ])
+    
     return InlineKeyboardMarkup(keyboard)
 
 # زر إلغاء العملية
 def cancel_keyboard():
     keyboard = [[InlineKeyboardButton("❌ إلغاء العملية", callback_data="cancel_action")]]
-    return InlineKeyboardMarkup(keyboard)
-
-# زر التبرع الشفاف بالنجوم (الجديد)
-def donation_inline_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("⭐ اضغط هنا لإظهار فاتورة الدفع", callback_data="pay_stars_50")],
-        [InlineKeyboardButton("❌ إلغاء", callback_data="cancel_action")]
-    ]
     return InlineKeyboardMarkup(keyboard)
