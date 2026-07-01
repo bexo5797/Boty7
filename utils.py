@@ -6,9 +6,8 @@ from telegram.ext import ContextTypes
 
 # الإعدادات الأساسية
 DB_FILE = "bot_stats.db"
-MAX_FILE_SIZE = 70 * 1024 * 1024  # 70MB
-DEFAULT_AUDIO_QUALITY = "192k"
-COVER_CACHE = "channel_cover_cached.jpg"
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB للصور
+DEFAULT_QUALITY = 95
 CHANNEL_USERNAME = "BEXO50"
 
 # ايدي المالك
@@ -17,7 +16,7 @@ OWNER_ID = 8798182716  # ⚠️ غير هذا الرقم إلى معرفك
 # وضع الصيانة
 MAINTENANCE_MODE = False
 
-# قائمة القنوات الإجبارية (سيتم تحميلها من قاعدة البيانات)
+# قائمة القنوات الإجبارية
 MANDATORY_CHANNELS = []
 
 def init_db():
@@ -30,14 +29,18 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS users 
                      (user_id INTEGER PRIMARY KEY, 
                       first_name TEXT, 
-                      join_date TEXT)''')
+                      username TEXT,
+                      join_date TEXT,
+                      processed_count INTEGER DEFAULT 0)''')
         
-        # جدول الملفات
-        c.execute('''CREATE TABLE IF NOT EXISTS files 
+        # جدول الصور المعالجة
+        c.execute('''CREATE TABLE IF NOT EXISTS processed_images 
                      (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                       user_id INTEGER, 
-                      title TEXT, 
-                      artist TEXT, 
+                      original_size INTEGER,
+                      processed_size INTEGER,
+                      enhancement_level INTEGER,
+                      enhancement_type TEXT,
                       date TEXT)''')
         
         # جدول التبرعات
@@ -56,16 +59,14 @@ def init_db():
                       added_by INTEGER,
                       added_date TEXT)''')
         
-        # فهارس لتحسين الأداء
-        c.execute('''CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id)''')
-        c.execute('''CREATE INDEX IF NOT EXISTS idx_files_date ON files(date)''')
+        # فهارس
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_processed_user_id ON processed_images(user_id)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_processed_date ON processed_images(date)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_donations_user_id ON donations(user_id)''')
-        c.execute('''CREATE INDEX IF NOT EXISTS idx_donations_date ON donations(date)''')
         
         conn.commit()
         logging.info("✅ تم تهيئة قاعدة البيانات بنجاح")
         
-        # تحميل القنوات الإجبارية
         load_mandatory_channels()
         
     except Exception as e:
@@ -85,7 +86,10 @@ def load_mandatory_channels():
         ).fetchall()
         conn.close()
         
-        MANDATORY_CHANNELS = [{"username": ch[0], "name": ch[1] or ch[0]} for ch in channels]
+        MANDATORY_CHANNELS = [
+            {"channel_username": ch[0], "channel_name": ch[1] or ch[0]} 
+            for ch in channels
+        ]
         logging.info(f"✅ تم تحميل {len(MANDATORY_CHANNELS)} قناة إجبارية")
     except Exception as e:
         logging.error(f"❌ خطأ في تحميل القنوات الإجبارية: {e}")
@@ -96,8 +100,11 @@ def add_mandatory_channel(channel_username, channel_name, added_by):
     try:
         conn = sqlite3.connect(DB_FILE)
         conn.execute(
-            "INSERT OR IGNORE INTO mandatory_channels (channel_username, channel_name, added_by, added_date) VALUES (?, ?, ?, ?)",
-            (channel_username, channel_name, added_by, datetime.now().strftime("%Y-%m-%d %H:%M"))
+            """INSERT OR IGNORE INTO mandatory_channels 
+               (channel_username, channel_name, added_by, added_date) 
+               VALUES (?, ?, ?, ?)""",
+            (channel_username, channel_name, added_by, 
+             datetime.now().strftime("%Y-%m-%d %H:%M"))
         )
         conn.commit()
         conn.close()
@@ -127,9 +134,6 @@ def get_mandatory_channels():
     """الحصول على قائمة القنوات الإجبارية"""
     return MANDATORY_CHANNELS
 
-# تنفيذ إنشاء الجداول تلقائياً
-init_db()
-
 async def is_maintenance(update, context):
     """التحقق من وضع الصيانة"""
     if MAINTENANCE_MODE:
@@ -148,9 +152,9 @@ async def auto_clear_cache():
     """تنظيف الملفات المؤقتة من السيرفر"""
     deleted = 0
     temp_patterns = [
-        ".mp3", "input_", "output_", "custom_", 
-        "final_", "cover_", "video_", "extracted_", "audio_",
-        "large_"
+        "enhanced_", "temp_", "_enhanced.", "_pil_enhanced.", 
+        "_sr_enhanced.", "_standard_enhanced.", "_premium_enhanced.", 
+        "_super_enhanced.", "input_", "output_", "processed_"
     ]
     
     try:
@@ -158,8 +162,7 @@ async def auto_clear_cache():
         one_hour_ago = current_time - 3600
         
         for file in os.listdir():
-            is_temp = any(file.endswith(pattern) or file.startswith(pattern) 
-                         for pattern in temp_patterns)
+            is_temp = any(pattern in file for pattern in temp_patterns)
             
             if is_temp:
                 try:
@@ -184,7 +187,7 @@ async def check_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         for channel in MANDATORY_CHANNELS:
-            username = channel['username']
+            username = channel['channel_username']
             if not username.startswith('@'):
                 username = f"@{username}"
             
@@ -194,7 +197,6 @@ async def check_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
                     return False
             except Exception as e:
                 logging.error(f"خطأ في فحص الاشتراك بالقناة {username}: {e}")
-                # إذا حدث خطأ، نعتبر المستخدم غير مشترك للأمان
                 return False
         
         return True
@@ -210,54 +212,25 @@ def get_unsubscribed_channels_text():
     text = "⚠️ **أنت غير مشترك في القنوات التالية!**\n\n"
     text += "يجب الاشتراك أولاً في القنوات التالية:\n"
     for channel in MANDATORY_CHANNELS:
-        username = channel['username']
+        username = channel['channel_username']
         if not username.startswith('@'):
             username = f"@{username}"
-        text += f"👉 {username} - {channel['name']}\n"
+        text += f"👉 {username} - {channel['channel_name']}\n"
     text += "\nبعد الاشتراك، ارسل /start مرة أخرى."
     return text
 
 async def get_channel_cover(context: ContextTypes.DEFAULT_TYPE):
-    """جلب صورة القناة لاستخدامها كغلاف للأغاني"""
-    try:
-        if os.path.exists(COVER_CACHE):
-            if os.path.getsize(COVER_CACHE) > 0:
-                file_age = datetime.now().timestamp() - os.path.getmtime(COVER_CACHE)
-                if file_age < 86400:
-                    return COVER_CACHE
-                else:
-                    os.remove(COVER_CACHE)
-                    logging.info("🗑️ تم حذف كاش صورة القناة القديم")
-        
-        chat = await context.bot.get_chat(f"@{CHANNEL_USERNAME}")
-        if chat.photo:
-            photo_file = await context.bot.get_file(chat.photo.big_file_id)
-            await photo_file.download_to_drive(COVER_CACHE)
-            
-            if os.path.exists(COVER_CACHE) and os.path.getsize(COVER_CACHE) > 0:
-                logging.info("✅ تم تحديث صورة القناة")
-                return COVER_CACHE
-            else:
-                logging.error("❌ فشل تحميل صورة القناة - الملف فارغ")
-                return None
-        else:
-            logging.warning("⚠️ القناة لا تحتوي على صورة")
-            return None
-            
-    except Exception as e:
-        logging.error(f"❌ خطأ جلب صورة القناة: {e}")
-        if os.path.exists(COVER_CACHE) and os.path.getsize(COVER_CACHE) > 0:
-            logging.info("📦 استخدام الكاش القديم لصورة القناة")
-            return COVER_CACHE
-        return None
+    """جلب صورة القناة (لم يعد مستخدم للصور)"""
+    return None
 
-def add_user(user_id, first_name):
+def add_user(user_id, first_name, username=None):
     """إضافة مستخدم جديد إلى قاعدة البيانات"""
     try:
         conn = sqlite3.connect(DB_FILE)
         conn.execute(
-            "INSERT OR IGNORE INTO users(user_id, first_name, join_date) VALUES (?, ?, ?)",
-            (user_id, first_name, datetime.now().strftime("%Y-%m-%d %H:%M"))
+            """INSERT OR IGNORE INTO users(user_id, first_name, username, join_date) 
+               VALUES (?, ?, ?, ?)""",
+            (user_id, first_name, username, datetime.now().strftime("%Y-%m-%d %H:%M"))
         )
         conn.commit()
     except Exception as e:
@@ -267,21 +240,74 @@ def add_user(user_id, first_name):
             conn.close()
 
 def add_file_record(user_id, title, artist):
-    """تسجيل عملية ناجحة في قاعدة البيانات"""
+    """تسجيل عملية معالجة صورة (تم تعديلها للصور)"""
     try:
         conn = sqlite3.connect(DB_FILE)
         conn.execute(
-            "INSERT INTO files (user_id, title, artist, date) VALUES (?, ?, ?, ?)",
-            (user_id, title, artist, datetime.now().strftime("%Y-%m-%d %H:%M"))
+            """UPDATE users SET processed_count = processed_count + 1 
+               WHERE user_id = ?""",
+            (user_id,)
         )
         conn.commit()
         return True
     except Exception as e:
-        logging.error(f"❌ خطأ في تسجيل الملف: {e}")
+        logging.error(f"❌ خطأ في تسجيل المعالجة: {e}")
         return False
     finally:
         if conn:
             conn.close()
+
+def add_image_record(user_id, original_size, processed_size, enhancement_type, level):
+    """تسجيل صورة معالجة في قاعدة البيانات"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute(
+            """INSERT INTO processed_images 
+               (user_id, original_size, processed_size, enhancement_level, enhancement_type, date) 
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, original_size, processed_size, level, enhancement_type, 
+             datetime.now().strftime("%Y-%m-%d %H:%M"))
+        )
+        conn.commit()
+        
+        # تحديث عدد المعالجات للمستخدم
+        conn.execute(
+            "UPDATE users SET processed_count = processed_count + 1 WHERE user_id = ?",
+            (user_id,)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في تسجيل الصورة: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_user_stats(user_id):
+    """الحصول على إحصائيات المستخدم"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        processed = cursor.execute(
+            "SELECT COUNT(*) FROM processed_images WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        
+        total_size = cursor.execute(
+            "SELECT COALESCE(SUM(original_size), 0) FROM processed_images WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()[0]
+        
+        conn.close()
+        
+        return {
+            "processed": processed,
+            "total_size_mb": round(total_size / (1024 * 1024), 2)
+        }
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب إحصائيات المستخدم: {e}")
+        return {"processed": 0, "total_size_mb": 0}
 
 def add_donation(user_id, amount, payment_id):
     """تسجيل تبرع في قاعدة البيانات"""
@@ -318,7 +344,6 @@ def get_donation_stats():
             "SELECT COUNT(*) FROM donations"
         ).fetchone()[0]
         
-        # آخر 10 تبرعات
         recent = cursor.execute(
             "SELECT user_id, amount, date FROM donations ORDER BY id DESC LIMIT 10"
         ).fetchall()
@@ -339,3 +364,6 @@ def get_donation_stats():
             "donations_count": 0,
             "recent": []
         }
+
+# تنفيذ إنشاء الجداول تلقائياً
+init_db()
