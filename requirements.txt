@@ -3,3 +3,5 @@ mutagen==1.46.0
 Pillow==10.1.0
 opencv-python==4.8.1.78
 numpy==1.24.3
+scikit-image==0.22.0
+scipy==1.11.4
