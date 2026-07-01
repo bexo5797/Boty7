@@ -7,7 +7,7 @@ from handlers import (
     start_handler, media_handler, text_handler, callback_query_handler, 
     photo_handler, donate_handler, pre_checkout_handler, successful_payment_handler
 )
-from admin_panel import panel_handler, admin_callback_handler
+from admin_panel import panel_handler, admin_callback_handler, handle_channel_input
 from utils import auto_clear_cache
 
 # إعدادات الـ Logging
@@ -38,7 +38,7 @@ def main():
     app.add_handler(CommandHandler("panel", panel_handler))
     
     # === أزرار الكولباك ===
-    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(admin_|toggle_|close_admin|admin_)"))
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(admin_|toggle_|close_admin|channel_)"))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
     
     # === معالجات الدفع بالنجوم ===
