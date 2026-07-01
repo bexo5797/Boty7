@@ -367,3 +367,20 @@ def get_donation_stats():
 
 # تنفيذ إنشاء الجداول تلقائياً
 init_db()
+def get_image_info(image_path):
+    """الحصول على معلومات الصورة"""
+    try:
+        from PIL import Image
+        with Image.open(image_path) as img:
+            info = {
+                "width": img.width,
+                "height": img.height,
+                "format": img.format,
+                "mode": img.mode,
+                "size": os.path.getsize(image_path),
+                "size_mb": round(os.path.getsize(image_path) / (1024 * 1024), 2)
+            }
+        return info
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب معلومات الصورة: {e}")
+        return None
