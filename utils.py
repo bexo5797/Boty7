@@ -17,6 +17,9 @@ OWNER_ID = 8798182716  # ⚠️ غير هذا الرقم إلى معرفك
 # وضع الصيانة
 MAINTENANCE_MODE = False
 
+# قائمة القنوات الإجبارية (سيتم تحميلها من قاعدة البيانات)
+MANDATORY_CHANNELS = []
+
 def init_db():
     """تهيئة قاعدة البيانات عند التشغيل"""
     try:
@@ -45,6 +48,14 @@ def init_db():
                       date TEXT,
                       telegram_payment_id TEXT)''')
         
+        # جدول القنوات الإجبارية
+        c.execute('''CREATE TABLE IF NOT EXISTS mandatory_channels 
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      channel_username TEXT UNIQUE,
+                      channel_name TEXT,
+                      added_by INTEGER,
+                      added_date TEXT)''')
+        
         # فهارس لتحسين الأداء
         c.execute('''CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_files_date ON files(date)''')
@@ -54,11 +65,67 @@ def init_db():
         conn.commit()
         logging.info("✅ تم تهيئة قاعدة البيانات بنجاح")
         
+        # تحميل القنوات الإجبارية
+        load_mandatory_channels()
+        
     except Exception as e:
         logging.error(f"❌ خطأ في تهيئة قاعدة البيانات: {e}")
     finally:
         if conn:
             conn.close()
+
+def load_mandatory_channels():
+    """تحميل القنوات الإجبارية من قاعدة البيانات"""
+    global MANDATORY_CHANNELS
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        channels = cursor.execute(
+            "SELECT channel_username, channel_name FROM mandatory_channels"
+        ).fetchall()
+        conn.close()
+        
+        MANDATORY_CHANNELS = [{"username": ch[0], "name": ch[1] or ch[0]} for ch in channels]
+        logging.info(f"✅ تم تحميل {len(MANDATORY_CHANNELS)} قناة إجبارية")
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحميل القنوات الإجبارية: {e}")
+        MANDATORY_CHANNELS = []
+
+def add_mandatory_channel(channel_username, channel_name, added_by):
+    """إضافة قناة إجبارية جديدة"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute(
+            "INSERT OR IGNORE INTO mandatory_channels (channel_username, channel_name, added_by, added_date) VALUES (?, ?, ?, ?)",
+            (channel_username, channel_name, added_by, datetime.now().strftime("%Y-%m-%d %H:%M"))
+        )
+        conn.commit()
+        conn.close()
+        load_mandatory_channels()
+        return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في إضافة القناة الإجبارية: {e}")
+        return False
+
+def remove_mandatory_channel(channel_username):
+    """حذف قناة إجبارية"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute(
+            "DELETE FROM mandatory_channels WHERE channel_username = ?",
+            (channel_username,)
+        )
+        conn.commit()
+        conn.close()
+        load_mandatory_channels()
+        return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في حذف القناة الإجبارية: {e}")
+        return False
+
+def get_mandatory_channels():
+    """الحصول على قائمة القنوات الإجبارية"""
+    return MANDATORY_CHANNELS
 
 # تنفيذ إنشاء الجداول تلقائياً
 init_db()
@@ -82,7 +149,8 @@ async def auto_clear_cache():
     deleted = 0
     temp_patterns = [
         ".mp3", "input_", "output_", "custom_", 
-        "final_", "cover_", "video_", "extracted_", "audio_"
+        "final_", "cover_", "video_", "extracted_", "audio_",
+        "large_"
     ]
     
     try:
@@ -110,13 +178,44 @@ async def auto_clear_cache():
         logging.error(f"❌ خطأ في تنظيف الملفات المؤقتة: {e}")
 
 async def check_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
-    """التحقق من الاشتراك في القناة"""
+    """التحقق من الاشتراك في جميع القنوات الإجبارية"""
+    if not MANDATORY_CHANNELS:
+        return True
+    
     try:
-        member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
-        return member.status not in ["left", "kicked"]
+        for channel in MANDATORY_CHANNELS:
+            username = channel['username']
+            if not username.startswith('@'):
+                username = f"@{username}"
+            
+            try:
+                member = await context.bot.get_chat_member(username, user_id)
+                if member.status in ["left", "kicked"]:
+                    return False
+            except Exception as e:
+                logging.error(f"خطأ في فحص الاشتراك بالقناة {username}: {e}")
+                # إذا حدث خطأ، نعتبر المستخدم غير مشترك للأمان
+                return False
+        
+        return True
     except Exception as e:
         logging.error(f"خطأ في فحص الاشتراك للمستخدم {user_id}: {e}")
         return True
+
+def get_unsubscribed_channels_text():
+    """الحصول على نص القنوات غير المشترك بها"""
+    if not MANDATORY_CHANNELS:
+        return ""
+    
+    text = "⚠️ **أنت غير مشترك في القنوات التالية!**\n\n"
+    text += "يجب الاشتراك أولاً في القنوات التالية:\n"
+    for channel in MANDATORY_CHANNELS:
+        username = channel['username']
+        if not username.startswith('@'):
+            username = f"@{username}"
+        text += f"👉 {username} - {channel['name']}\n"
+    text += "\nبعد الاشتراك، ارسل /start مرة أخرى."
+    return text
 
 async def get_channel_cover(context: ContextTypes.DEFAULT_TYPE):
     """جلب صورة القناة لاستخدامها كغلاف للأغاني"""
